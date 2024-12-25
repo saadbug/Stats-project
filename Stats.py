@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from io import BytesIO
 
+
 # --- Helper Functions ---
 
 def calculate_absolute_grades(scores, thresholds):
@@ -18,6 +19,7 @@ def calculate_absolute_grades(scores, thresholds):
                 grades.append(grade)
                 break
     return grades
+
 
 def calculate_relative_grades(scores, mean, std):
     """
@@ -49,6 +51,7 @@ def calculate_relative_grades(scores, mean, std):
 
     return grades
 
+
 def calculate_relative_grades_percentile(scores, percentages):
     """
     Assign grades using user-defined percentages for each grade.
@@ -67,6 +70,7 @@ def calculate_relative_grades_percentile(scores, percentages):
 
     return grades
 
+
 def export_to_excel(df):
     """
     Export data to an Excel file.
@@ -75,6 +79,17 @@ def export_to_excel(df):
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         df.to_excel(writer, index=False)
     return output
+
+
+def standardize_scores(scores):
+    """
+    Standardize scores to have a mean of 0 and a standard deviation of 1.
+    """
+    mean_score = scores.mean()
+    std_score = scores.std()
+    standardized_scores = (scores - mean_score) / std_score
+    return standardized_scores
+
 
 # --- Streamlit App ---
 
@@ -129,6 +144,9 @@ if file is not None:
 
             grades = calculate_absolute_grades(scores, thresholds)
 
+            # No need for standardized scores in absolute grading
+            standardized_scores = scores
+
         else:
             st.subheader("Relative Grading Options")
             relative_grading_choice = st.radio(
@@ -137,11 +155,14 @@ if file is not None:
             )
 
             if relative_grading_choice == "User-Defined Percentages":
-                st.write("Specify the percentages for A and F grades. Remaining grades will be distributed proportionally.")
+                st.write(
+                    "Specify the percentages for A and F grades. Remaining grades will be distributed proportionally.")
 
                 # User inputs for A and F percentages
-                percentage_a = st.number_input("Percentage of students receiving A grade", min_value=0.0, max_value=100.0, step=0.1)
-                percentage_f = st.number_input("Percentage of students receiving F grade", min_value=0.0, max_value=100.0, step=0.1)
+                percentage_a = st.number_input("Percentage of students receiving A grade", min_value=0.0,
+                                               max_value=100.0, step=0.1)
+                percentage_f = st.number_input("Percentage of students receiving F grade", min_value=0.0,
+                                               max_value=100.0, step=0.1)
 
                 remaining_percentage = 100.0 - (percentage_a + percentage_f)
                 if remaining_percentage < 0:
@@ -155,26 +176,46 @@ if file is not None:
 
                     grades = calculate_relative_grades_percentile(scores, percentages)
 
+                    # Standardize scores before applying the grading calculation
+                    standardized_scores = standardize_scores(scores)
+
             else:  # Predefined Formula
                 mean = scores.mean()
                 std = scores.std()
                 st.write(f"Using default boundaries: Mean = {mean:.2f}, Std Dev = {std:.2f}")
-                grades = calculate_relative_grades(scores, mean, std)
 
+                # Standardize scores before applying the grading calculation
+                standardized_scores = standardize_scores(scores)
+                standardized_mean = standardized_scores.mean()
+                standardized_std = standardized_scores.std()
+                st.write(f"Standardized scores: Mean = {standardized_mean:.2f}, Std Dev = {standardized_std:.2f}")
+                grades = calculate_relative_grades(standardized_scores, standardized_mean, standardized_std)
+
+        data["Standardized Scores"] = standardized_scores
         data["Grades"] = grades
 
         # Step 3: Visualizations
         st.header("3. Visualizations")
+
+        # Original Score Distribution
+        st.subheader("Original Score Distribution")
+        fig, ax = plt.subplots()
+        sns.histplot(scores, kde=True, ax=ax, color="blue")
+        ax.set_title("Original Score Distribution")
+        st.pyplot(fig)
+
+        # Standardized Score Distribution
+        st.subheader("Standardized Score Distribution")
+        fig, ax = plt.subplots()
+        sns.histplot(standardized_scores, kde=True, ax=ax, color="green")
+        ax.set_title("Standardized Score Distribution")
+        st.pyplot(fig)
+
+        # Grade Distribution
         st.subheader("Grade Distribution")
         fig, ax = plt.subplots()
         sns.countplot(x="Grades", data=data, order=["A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D", "F"], ax=ax)
         ax.set_title("Grade Distribution")
-        st.pyplot(fig)
-
-        st.subheader("Score Distribution")
-        fig, ax = plt.subplots()
-        sns.histplot(scores, kde=True, ax=ax)
-        ax.set_title("Score Distribution")
         st.pyplot(fig)
 
         # Summary statistics
