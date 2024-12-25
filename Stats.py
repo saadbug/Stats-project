@@ -1,64 +1,40 @@
-import numpy as np
+import streamlit as st
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.stats import norm, zscore
-from tkinter import filedialog
-from tkinter import Tk
+from io import BytesIO
 
+# --- Helper Functions ---
 
-# Input Module
-def load_grades():
-    """Allow the instructor to input student grades via a CSV or Excel file."""
-    Tk().withdraw()  # Hides the root window
-    file_path = filedialog.askopenfilename(title="Select a CSV or Excel File",
-                                           filetypes=[("CSV files", "*.csv"), ("Excel files", "*.xlsx")])
+def calculate_relative_grades(scores, mean, std):
+    grade_boundaries = {
+        "A": (mean + 1.5 * std, mean + 2 * std),
+        "A-": (mean + std, mean + 1.5 * std),
+        "B+": (mean + 0.5 * std, mean + std),
+        "B": (mean - 0.5 * std, mean + 0.5 * std),
+        "B-": (mean - std, mean - 0.5 * std),
+        "C+": (mean - (4 / 3) * std, mean - std),
+        "C": (mean - (5 / 3) * std, mean - (4 / 3) * std),
+        "C-": (mean - 2 * std, mean - (5 / 3) * std),
+        "D": (mean - 2 * std, None),
+        "F": (None, mean - 2 * std),
+    }
 
-    if file_path.endswith(".csv"):
-        grades = pd.read_csv(file_path)
-    elif file_path.endswith(".xlsx"):
-        grades = pd.read_excel(file_path)
-    else:
-        raise ValueError("Unsupported file type. Please select a CSV or Excel file.")
-
-    if 'Score' not in grades.columns:
-        raise ValueError("The file must contain a 'Score' column with student grades.")
+    grades = []
+    for score in scores:
+        assigned = False
+        for grade, (lower, upper) in grade_boundaries.items():
+            if (lower is None or score >= lower) and (upper is None or score < upper):
+                grades.append(grade)
+                assigned = True
+                break
+        if not assigned:
+            grades.append("F")
 
     return grades
 
-
-# Statistical Analysis
-def calculate_statistics(scores):
-    """Calculate descriptive statistics for the input grades."""
-    stats = {
-        'Mean': np.mean(scores),
-        'Variance': np.var(scores),
-        'Skewness': pd.Series(scores).skew(),
-        'Min': np.min(scores),
-        'Max': np.max(scores)
-    }
-    return stats
-
-
-def plot_distributions(scores, adjusted_scores=None):
-    """Plot histograms and density plots of the grade distribution before and after adjustments."""
-    plt.figure(figsize=(12, 6))
-
-    sns.histplot(scores, kde=True, label="Original Grades", color="blue", bins=15)
-
-    if adjusted_scores is not None:
-        sns.histplot(adjusted_scores, kde=True, label="Adjusted Grades", color="orange", bins=15)
-
-    plt.title("Grade Distributions")
-    plt.xlabel("Scores")
-    plt.ylabel("Frequency")
-    plt.legend()
-    plt.show()
-
-
-# Grade Adjustment
-def apply_absolute_grading(scores, thresholds):
-    """Apply absolute grading based on fixed thresholds."""
+def calculate_absolute_grades(scores, thresholds):
     grades = []
     for score in scores:
         for grade, threshold in thresholds.items():
@@ -67,95 +43,114 @@ def apply_absolute_grading(scores, thresholds):
                 break
     return grades
 
+def generate_summary_statistics(grades):
+    return pd.DataFrame(grades.value_counts(), columns=["Count"])
 
-def apply_relative_grading(scores, grade_distribution):
-    """Adjust grades to match a predefined distribution using z-score scaling."""
-    sorted_scores = sorted(scores)
-    percentiles = np.percentile(sorted_scores, np.linspace(0, 100, len(grade_distribution) + 1))
+def export_to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False)
+    return output
 
-    adjusted_grades = []
-    for score in scores:
-        for i, boundary in enumerate(percentiles[1:], start=1):
-            if score <= boundary:
-                adjusted_grades.append(list(grade_distribution.keys())[i - 1])
-                break
-    return adjusted_grades
+# --- Streamlit App ---
 
+st.title("University Grading System")
 
-# Reporting and Visualization
-def generate_report(original_scores, adjusted_scores, original_grades, adjusted_grades):
-    """Provide a detailed report showing the original and adjusted grades."""
-    report = pd.DataFrame({
-        "Original Scores": original_scores,
-        "Adjusted Scores": adjusted_scores,
-        "Original Grades": original_grades,
-        "Adjusted Grades": adjusted_grades
-    })
-    print(report.describe())
-    return report
+# Step 1: File Upload
+st.header("1. Upload Student Scores")
+file = st.file_uploader("Upload a CSV or Excel file containing student scores.", type=["csv", "xlsx"])
 
-
-def save_report(report):
-    """Save the report to a CSV file."""
-    file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")])
-    if file_path:
-        report.to_csv(file_path, index=False)
-        print(f"Report saved to {file_path}")
+if file is not None:
+    if file.name.endswith(".csv"):
+        data = pd.read_csv(file)
     else:
-        print("Save operation was cancelled.")
+        data = pd.read_excel(file)
 
-
-# Main Functionality
-def main():
-    print("Welcome to the Grading System")
-
-    # Load grades
-    grades_df = load_grades()
-    scores = grades_df['Score'].values
-
-    # Display statistics
-    stats = calculate_statistics(scores)
-    print("Original Statistics:", stats)
-
-    # Plot original distribution
-    plot_distributions(scores)
-
-    # Choose grading method
-    method = input("Choose grading method (absolute/relative): ").strip().lower()
-
-    if method == "absolute":
-        thresholds = {
-            "A": 90,
-            "A-": 80,
-            "B": 70,
-            "C": 60,
-            "D": 50,
-            "F": 0
-        }
-        original_grades = apply_absolute_grading(scores, thresholds)
-        adjusted_grades = original_grades  # No adjustments in absolute grading
-
-    elif method == "relative":
-        grade_distribution = {
-            "A": 0.2,
-            "B": 0.3,
-            "C": 0.3,
-            "D": 0.15,
-            "F": 0.05
-        }
-        adjusted_grades = apply_relative_grading(scores, grade_distribution)
-        original_grades = ["N/A"] * len(scores)  # Original grades undefined in relative grading
+    if "Scores" not in data.columns:
+        st.error("The file must contain a column named 'Scores'.")
     else:
-        print("Invalid method chosen. Please restart.")
-        return
+        st.success("File uploaded successfully!")
+        scores = data["Scores"]
 
-    # Generate and save report
-    report = generate_report(scores, scores, original_grades, adjusted_grades)
-    save_report(report)
+        # Step 2: Choose Grading Scheme
+        st.header("2. Choose Grading Scheme")
+        grading_scheme = st.radio(
+            "Select the grading scheme:",
+            ("Absolute Grading", "Relative Grading")
+        )
 
-    # Plot adjusted distribution
-    plot_distributions(scores, scores)
+        if grading_scheme == "Absolute Grading":
+            st.subheader("Define Absolute Grade Thresholds")
+            thresholds = {}
+            for grade in ["A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D", "F"]:
+                thresholds[grade] = st.number_input(f"Enter minimum percentage for {grade}", min_value=0.0, max_value=100.0, step=0.1)
 
+            grades = calculate_absolute_grades(scores, thresholds)
 
-if __name__ == "__main__":
-    main()
+        else:
+            st.subheader("Define Relative Grading Parameters")
+            mean = scores.mean()
+            std = scores.std()
+            st.write(f"Mean: {mean:.2f}, Standard Deviation: {std:.2f}")
+            # Remove any invalid or missing scores before calculating grades
+            valid_scores = scores.dropna()  # Drop missing values
+            valid_scores = valid_scores[
+                valid_scores.apply(lambda x: isinstance(x, (int, float)))]  # Ensure scores are numeric
+
+            if len(valid_scores) == 0:
+                st.error("No valid scores found. Please ensure the 'Scores' column contains valid numeric values.")
+            else:
+                if grading_scheme == "Absolute Grading":
+                    grades = calculate_absolute_grades(valid_scores, thresholds)
+                else:
+                    grades = calculate_relative_grades(valid_scores, mean, std)
+
+                # Map grades back to the original dataset
+                data["Grades"] = pd.Series(grades, index=valid_scores.index).reindex(data.index, fill_value="N/A")
+
+        if scores.isnull().any():
+            st.error("The 'Scores' column contains missing values. Please clean your data and try again.")
+        else:
+            if grading_scheme == "Absolute Grading":
+                grades = calculate_absolute_grades(scores, thresholds)
+            else:
+                grades = calculate_relative_grades(scores, scores.mean(), scores.std())
+
+            if len(grades) == len(scores):
+                data["Grades"] = grades
+            else:
+                st.error(
+                    "Error: Mismatch in the number of grades and scores. Please verify your data and grading logic.")
+
+        # Step 3: Visualizations
+        st.header("3. Visualizations")
+        st.subheader("Grade Distribution")
+        fig, ax = plt.subplots()
+        sns.countplot(x="Grades", data=data, order=["A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D", "F"], ax=ax)
+        ax.set_title("Grade Distribution")
+        st.pyplot(fig)
+
+        st.subheader("Score Distribution")
+        fig, ax = plt.subplots()
+        sns.histplot(scores, kde=True, ax=ax)
+        ax.set_title("Score Distribution")
+        st.pyplot(fig)
+
+        # Summary statistics
+        st.subheader("Summary Statistics")
+        grades_series = pd.Series(data["Grades"])
+        summary = grades_series.value_counts().reset_index()
+        summary.columns = ["Grade", "Count"]
+        st.dataframe(summary)
+
+        # Export results
+        st.header("4. Export Results")
+        export_file = export_to_excel(data)
+        st.download_button(
+            label="Download Grades as Excel",
+            data=export_file.getvalue(),
+            file_name="graded_students.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        st.success("Grading process completed successfully!")
