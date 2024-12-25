@@ -1,0 +1,7 @@
+pandas
+numpy
+matplotlib
+seaborn
+streamlit
+openpyxl  # Required for handling Excel files
+xlsxwriter  # For exporting Excel files
